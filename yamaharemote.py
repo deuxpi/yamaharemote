@@ -76,6 +76,10 @@ class YamahaRemoteControl(GObject.GObject):
     def _put(self, data):
         return self._exec("PUT", data)
 
+    def get_network_name(self):
+        cmd = "<System><Misc><Network><Network_Name>GetParam</Network_Name></Network></Misc></System>"
+        return self._get(cmd).find("System/Misc/Network/Network_Name").text
+
     def set_is_power_on(self, is_power_on):
         if is_power_on != self.is_power_on:
             cmd = "<Main_Zone><Power_Control><Power>%s</Power></Power_Control></Main_Zone>" % ["Standby", "On"][is_power_on]
@@ -137,9 +141,26 @@ class YamahaRemoteControl(GObject.GObject):
             self.is_power_on = is_power_on
             self.notify('power')
 
+    def get_inputs(self):
+        cmd = "<Main_Zone><Input><Input_Sel_Item>GetParam</Input_Sel_Item></Input></Main_Zone>"
+        items = self._get(cmd).find("Main_Zone/Input/Input_Sel_Item")
+        inputs = []
+        for item in items.getchildren():
+            inputs.append(item.find("Param").text)
+        return inputs
+
+    def get_input(self):
+        cmd = "<Main_Zone><Input><Input_Sel>GetParam</Input_Sel></Input></Main_Zone>"""
+        return self._get(cmd).find("Main_Zone/Input/Input_Sel").text
+
+    def set_input(self, input_name):
+        cmd = "<Main_Zone><Input><Input_Sel>%s</Input_Sel></Input></Main_Zone>" % input_name
+        self._put(cmd)
+
 class YamahaRemoteWindow(Gtk.Window):
     def __init__(self):
         Gtk.Window.__init__(self, title="Yamaha Remote Control")
+        self.set_size_request(400, -1)
         self.set_resizable(False)
         self.set_border_width(12)
 
@@ -152,9 +173,9 @@ class YamahaRemoteWindow(Gtk.Window):
         image = Gtk.Image.new_from_icon_name("audio-speakers", Gtk.IconSize.DIALOG)
         system_box.pack_start(image, False, False, 0)
 
-        label = Gtk.Label()
-        label.set_markup("<b>RX-V573</b>")
-        system_box.pack_start(label, False, False, 0)
+        name_label = Gtk.Label()
+        name_label.set_markup("<b>Receiver</b>")
+        system_box.pack_start(name_label, False, False, 0)
 
         power_box = Gtk.Alignment(xalign=1.0, yalign=0.5, xscale=0.0, yscale=0.0)
         self.power_switch = Gtk.Switch()
@@ -192,11 +213,43 @@ class YamahaRemoteWindow(Gtk.Window):
         mute_box.add(self.mute_switch)
         volume_box.pack_start(mute_box, False, False, 0)
 
+        input_box = Gtk.Box(spacing=12)
+        vbox.pack_start(input_box, True, True, 0)
+
+        frame = Gtk.Frame(label="Choose a sound input:")
+        frame.set_shadow_type(Gtk.ShadowType.NONE)
+        input_box.pack_start(frame, True, True, 0)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_shadow_type(Gtk.ShadowType.IN)
+        scrolled.set_min_content_height(150)
+        frame.add(scrolled)
+
+        store = Gtk.ListStore(str)
+        self.input_tree = Gtk.TreeView(store)
+        self.input_tree.set_headers_visible(False)
+        selection = self.input_tree.get_selection()
+        selection.set_mode(Gtk.SelectionMode.BROWSE)
+        selection.connect("changed", self.on_input_selection_changed)
+        scrolled.add(self.input_tree)
+
+        renderer = Gtk.CellRendererText()
+        column = Gtk.TreeViewColumn("Name", renderer, text=0)
+        self.input_tree.append_column(column)
+
         self.remote = YamahaRemoteControl()
         self.remote.connect("notify::volume", self.on_remote_volume_notify)
         self.remote.connect("notify::muted", self.on_remote_muted_notify)
         self.remote.connect("notify::power", self.on_remote_power_notify)
         self.remote.refresh()
+
+        name_label.set_markup("<b>%s</b>" % self.remote.get_network_name())
+        input_iter = self.add_inputs()
+        if input_iter is not None:
+            selection.handler_block_by_func(self.on_input_selection_changed)
+            selection.select_iter(input_iter)
+            selection.handler_unblock_by_func(self.on_input_selection_changed)
 
     def on_power_notify(self, switch, data):
         self.remote.set_is_power_on(switch.get_active())
@@ -223,6 +276,22 @@ class YamahaRemoteWindow(Gtk.Window):
         self.mute_switch.freeze_notify()
         self.mute_switch.set_active(not self.remote.get_is_muted())
         self.mute_switch.thaw_notify()
+
+    def add_inputs(self):
+        model = self.input_tree.get_model()
+        current_input = self.remote.get_input()
+        current_iter = None
+        for input_name in self.remote.get_inputs():
+            input_iter = model.append([input_name])
+            if input_name == current_input:
+                current_iter = input_iter
+        return current_iter
+
+    def on_input_selection_changed(self, selection):
+        model, treeiter = selection.get_selected()
+        if treeiter is not None:
+            name = model[treeiter][0]
+            self.remote.set_input(name)
 
 if __name__ == '__main__':
     win = YamahaRemoteWindow()

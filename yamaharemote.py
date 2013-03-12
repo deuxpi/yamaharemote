@@ -3,7 +3,7 @@ import cStringIO
 import xml.etree.ElementTree as ET
 import sys
 
-from gi.repository import GObject, Gtk
+from gi.repository import GObject, Gtk, Pango
 
 AMP_ADDRESS = "192.168.1.158"
 
@@ -164,11 +164,11 @@ class YamahaRemoteWindow(Gtk.Window):
         self.set_resizable(False)
         self.set_border_width(12)
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(vbox)
 
-        system_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        vbox.pack_start(system_box, False, False, 6)
+        system_box = Gtk.Box(spacing=12)
+        vbox.pack_start(system_box, False, False, 12)
 
         image = Gtk.Image.new_from_icon_name("audio-speakers", Gtk.IconSize.DIALOG)
         system_box.pack_start(image, False, False, 0)
@@ -184,16 +184,14 @@ class YamahaRemoteWindow(Gtk.Window):
         power_box.add(self.power_switch)
         system_box.pack_start(power_box, True, True, 0)
 
-        volume_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        volume_box = Gtk.Box(spacing=12)
         alignment = Gtk.Alignment(xalign=0, yalign=0, xscale=1, yscale=1)
-        alignment.set_padding(12, 0, 0, 0)
         alignment.add(volume_box)
-        vbox.pack_start(alignment, False, False, 6)
+        vbox.pack_start(alignment, False, False, 12)
 
         label = Gtk.Label()
         label.set_label("Volume:")
         label.set_alignment(0.0, 0.5)
-        label.get_style_context().add_class('dim-label')
         volume_box.pack_start(label, False, False, 0)
 
         adj = Gtk.Adjustment(-40.0, -80.0, 16.0, 0.5, 5.0, 0.0)
@@ -218,13 +216,21 @@ class YamahaRemoteWindow(Gtk.Window):
 
         frame = Gtk.Frame(label="Choose a sound input:")
         frame.set_shadow_type(Gtk.ShadowType.NONE)
+        label = frame.get_label_widget()
+        font_desc = Pango.FontDescription()
+        font_desc.set_weight(Pango.Weight.BOLD)
+        label.modify_font(font_desc)
         input_box.pack_start(frame, True, True, 0)
+
+        input_box = Gtk.Alignment(xalign=0.0, yalign=0.0, xscale=1.0, yscale=1.0)
+        input_box.set_padding(6, 0, 0, 0)
+        frame.add(input_box)
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_shadow_type(Gtk.ShadowType.IN)
         scrolled.set_min_content_height(150)
-        frame.add(scrolled)
+        input_box.add(scrolled)
 
         store = Gtk.ListStore(str)
         self.input_tree = Gtk.TreeView(store)

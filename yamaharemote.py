@@ -2,6 +2,7 @@ import pycurl
 import cStringIO
 import xml.etree.ElementTree as ET
 import sys
+import time
 
 from gi.repository import GObject, Gtk, Pango
 
@@ -21,6 +22,10 @@ class YamahaRemoteControl(GObject.GObject):
                   "Is system powered up",
                   True,
                   GObject.PARAM_READWRITE),
+        "source": (str, "source",
+                  "Selected input device",
+                  "",
+                  GObject.PARAM_READWRITE),
         }
 
     def __init__(self):
@@ -30,6 +35,7 @@ class YamahaRemoteControl(GObject.GObject):
         self.volume = 0.0
         self.new_volume = 0.0
         self.is_muted = False
+        self.source = None
 
         self.curl = pycurl.Curl()
         self.curl.setopt(pycurl.POST, 1)
@@ -68,7 +74,17 @@ class YamahaRemoteControl(GObject.GObject):
         b = cStringIO.StringIO()
         self.curl.setopt(pycurl.WRITEFUNCTION, b.write)
         self.curl.perform()
-        return ET.fromstring(b.getvalue())
+        root = ET.fromstring(b.getvalue())
+        error_code = int(root.get("RC"))
+        if error_code == 2:
+            print >>sys.stderr, "Warning: error in node designation"
+        elif error_code == 3:
+            print >>sys.stderr, "Warning: error in parameter (value/range)"
+        elif error_code == 4:
+            print >>sys.stderr, "Warning: not successfully set due to a system error"
+        elif error_code == 5:
+            print >>sys.stderr, "Warning: internal error"
+        return root
 
     def _get(self, data):
         return self._exec("GET", data)
@@ -141,7 +157,12 @@ class YamahaRemoteControl(GObject.GObject):
             self.is_power_on = is_power_on
             self.notify('power')
 
-    def get_inputs(self):
+        source = status.find("Input/Input_Sel").text
+        if source != self.source:
+            self.source = source
+            self.notify('source')
+
+    def get_sources(self):
         cmd = "<Main_Zone><Input><Input_Sel_Item>GetParam</Input_Sel_Item></Input></Main_Zone>"
         items = self._get(cmd).find("Main_Zone/Input/Input_Sel_Item")
         inputs = []
@@ -149,20 +170,72 @@ class YamahaRemoteControl(GObject.GObject):
             inputs.append(item.find("Param").text)
         return inputs
 
-    def get_input(self):
-        cmd = "<Main_Zone><Input><Input_Sel>GetParam</Input_Sel></Input></Main_Zone>"""
-        return self._get(cmd).find("Main_Zone/Input/Input_Sel").text
+    def get_source(self):
+        return self.source
 
-    def set_input(self, input_name):
-        cmd = "<Main_Zone><Input><Input_Sel>%s</Input_Sel></Input></Main_Zone>" % input_name
+    def set_source(self, input_name):
+        if input_name != self.source:
+            cmd = "<Main_Zone><Input><Input_Sel>%s</Input_Sel></Input></Main_Zone>" % input_name
+            self._put(cmd)
+            self.source = input_name
+            self.notify('source')
+
+    def wait_for_menu_info(self):
+        while True:
+            cmd = "<%s><List_Info>GetParam</List_Info></%s>" % (self.source, self.source)
+            info = self._get(cmd).find("%s/List_Info" % self.source)
+            status = info.find("Menu_Status").text
+            if status == "Ready":
+                return info
+            time.sleep(0.05)
+
+    def jump_to_line(self, line):
+        cmd = "<%s><List_Control><Jump_Line>%d</Jump_Line></List_Control></%s>" % (self.source, line, self.source)
+        self._put(cmd)
+
+    def get_menu_name(self):
+        info = self.wait_for_menu_info()
+        return info.find("Menu_Name").text
+
+    def get_menu(self):
+        if self.source is None:
+            return
+
+        info = self.wait_for_menu_info()
+        max_line = int(info.find("Cursor_Position/Max_Line").text)
+
+        line = 1
+        while line <= max_line:
+            self.jump_to_line(line)
+            info = self.wait_for_menu_info()
+            for e in info.find("Current_List").getchildren():
+                if e.find("Attribute").text != "Unselectable":
+                    text = e.find("Txt").text
+                    # Sometimes, entities are double-encoded.
+                    text = text.replace("&amp;", "&")
+                    yield (line + int(e.tag[5:]) - 1, text)
+            line += 8
+
+    def select_menu(self, line):
+        self.jump_to_line(line)
+        info = self.wait_for_menu_info()
+        cmd = "<%s><List_Control><Direct_Sel>Line_%d</Direct_Sel></List_Control></%s>" % (self.source, (line - 1) % 8 + 1, self.source)
+        self._put(cmd)
+
+    def menu_return(self):
+        if self.source is None:
+            return
+        cmd = "<%s><List_Control><Cursor>Return</Cursor></List_Control></%s>" % (self.source, self.source)
         self._put(cmd)
 
 class YamahaRemoteWindow(Gtk.Window):
     def __init__(self):
         Gtk.Window.__init__(self, title="Yamaha Remote Control")
-        self.set_size_request(400, -1)
+        self.set_size_request(600, -1)
         self.set_resizable(False)
         self.set_border_width(12)
+
+        self.load_id = None
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(vbox)
@@ -244,6 +317,39 @@ class YamahaRemoteWindow(Gtk.Window):
         column = Gtk.TreeViewColumn("Name", renderer, text=0)
         self.input_tree.append_column(column)
 
+        menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        vbox.pack_start(menu_box, True, True, 12)
+
+        path_bar = Gtk.Box()
+        path_bar.get_style_context().add_class("linked")
+        menu_box.pack_start(path_bar, False, False, 0)
+
+        self.parent_button = Gtk.Button()
+        self.parent_button.set_focus_on_click(False)
+        self.parent_button.add(Gtk.Arrow(Gtk.ArrowType.LEFT, Gtk.ShadowType.OUT))
+        self.parent_button.connect("clicked", self.on_parent_button_clicked)
+        path_bar.add(self.parent_button)
+        self.current_button = Gtk.ToggleButton("Current")
+        self.current_button.set_active(True)
+        self.current_button.connect("clicked", self.on_current_button_clicked)
+        path_bar.add(self.current_button)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_shadow_type(Gtk.ShadowType.IN)
+        scrolled.set_min_content_height(150)
+        menu_box.pack_start(scrolled, True, True, 0)
+
+        self.menu_tree = Gtk.TreeView()
+        self.menu_tree.set_rules_hint(True)
+        self.menu_tree.set_headers_visible(False)
+        self.menu_tree.connect("row-activated", self.on_menu_row_activated)
+        scrolled.add(self.menu_tree)
+
+        renderer = Gtk.CellRendererText()
+        column = Gtk.TreeViewColumn("Text", renderer, text=0)
+        self.menu_tree.append_column(column)
+
         self.remote = YamahaRemoteControl()
         self.remote.connect("notify::volume", self.on_remote_volume_notify)
         self.remote.connect("notify::muted", self.on_remote_muted_notify)
@@ -256,6 +362,8 @@ class YamahaRemoteWindow(Gtk.Window):
             selection.handler_block_by_func(self.on_input_selection_changed)
             selection.select_iter(input_iter)
             selection.handler_unblock_by_func(self.on_input_selection_changed)
+
+        self.update_menu()
 
     def on_power_notify(self, switch, data):
         self.remote.set_is_power_on(switch.get_active())
@@ -285,9 +393,9 @@ class YamahaRemoteWindow(Gtk.Window):
 
     def add_inputs(self):
         model = self.input_tree.get_model()
-        current_input = self.remote.get_input()
+        current_input = self.remote.get_source()
         current_iter = None
-        for input_name in self.remote.get_inputs():
+        for input_name in self.remote.get_sources():
             input_iter = model.append([input_name])
             if input_name == current_input:
                 current_iter = input_iter
@@ -297,7 +405,39 @@ class YamahaRemoteWindow(Gtk.Window):
         model, treeiter = selection.get_selected()
         if treeiter is not None:
             name = model[treeiter][0]
-            self.remote.set_input(name)
+            self.remote.set_source(name)
+
+    def load_menu(self, model, items):
+        for item in items:
+            model.append([item[1], item[0]])
+            yield True
+        self.menu_tree.set_model(model)
+        self.load_id = None
+        yield False
+
+    def update_menu(self):
+        if self.load_id is not None:
+            GObject.source_remove(self.load_id)
+            self.load_id = None
+        model = Gtk.ListStore(str, int)
+        self.menu_tree.set_model(model)
+        self.current_button.set_label(self.remote.get_menu_name())
+        self.load_id = GObject.idle_add(self.load_menu(model, self.remote.get_menu()).next)
+
+    def on_menu_row_activated(self, tree, path, column):
+        model = tree.get_model()
+        menu_iter = model.get_iter(path)
+        self.remote.select_menu(model[menu_iter][1])
+        self.update_menu()
+
+    def on_parent_button_clicked(self, button):
+        self.remote.menu_return()
+        self.update_menu()
+
+    def on_current_button_clicked(self, button):
+        button.handler_block_by_func(self.on_current_button_clicked)
+        button.set_active(True)
+        button.handler_unblock_by_func(self.on_current_button_clicked)
 
 if __name__ == '__main__':
     win = YamahaRemoteWindow()

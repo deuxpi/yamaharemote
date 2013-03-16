@@ -231,7 +231,7 @@ class YamahaRemoteControl(GObject.GObject):
 class YamahaRemoteWindow(Gtk.Window):
     def __init__(self):
         Gtk.Window.__init__(self, title="Yamaha Remote Control")
-        self.set_size_request(600, -1)
+        self.set_size_request(500, -1)
         self.set_resizable(False)
         self.set_border_width(12)
 
@@ -347,7 +347,9 @@ class YamahaRemoteWindow(Gtk.Window):
         scrolled.add(self.menu_tree)
 
         renderer = Gtk.CellRendererText()
+        renderer.set_property("ellipsize", Pango.EllipsizeMode.END);
         column = Gtk.TreeViewColumn("Text", renderer, text=0)
+        column.set_cell_data_func(renderer, self.cell_data_func)
         self.menu_tree.append_column(column)
 
         self.remote = YamahaRemoteControl()
@@ -407,6 +409,14 @@ class YamahaRemoteWindow(Gtk.Window):
             name = model[treeiter][0]
             self.remote.set_source(name)
 
+    def cell_data_func(self, column, renderer, model, iter_, data):
+        text = model.get(iter_, 0)[0]
+        if text.startswith("- ") and text.endswith(" -"):
+            renderer.set_property("text", text[2:-2])
+            renderer.set_property("weight", Pango.Weight.BOLD)
+        else:
+            renderer.set_property("weight", Pango.Weight.NORMAL)
+
     def load_menu(self, model, items):
         for item in items:
             model.append([item[1], item[0]])
@@ -421,7 +431,10 @@ class YamahaRemoteWindow(Gtk.Window):
             self.load_id = None
         model = Gtk.ListStore(str, int)
         self.menu_tree.set_model(model)
-        self.current_button.set_label(self.remote.get_menu_name())
+        menu_name = self.remote.get_menu_name()
+        if menu_name.startswith("- ") and menu_name.endswith(" -"):
+            menu_name = menu_name[2:-2]
+        self.current_button.set_label(menu_name)
         self.load_id = GObject.idle_add(
                 self.load_menu(model, self.remote.get_menu()).next)
 

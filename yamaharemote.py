@@ -23,9 +23,17 @@ class YamahaRemoteControl(GObject.GObject):
                   True,
                   GObject.PARAM_READWRITE),
         "source": (str, "source",
-                  "Selected input device",
-                  "",
-                  GObject.PARAM_READWRITE),
+                   "Selected input device",
+                   "",
+                   GObject.PARAM_READWRITE),
+        "repeat": (str, "repeat",
+                   "Repeat",
+                   "Off",
+                   GObject.PARAM_READWRITE),
+        "shuffle": (str, "shuffle",
+                    "Shuffle",
+                    "Off",
+                    GObject.PARAM_READWRITE),
         }
 
     def __init__(self):
@@ -37,6 +45,8 @@ class YamahaRemoteControl(GObject.GObject):
         self.is_muted = False
         self.source_param_names = {}
         self.source = None
+        self.shuffle = "Off"
+        self.repeat = "Off"
 
         self.curl = pycurl.Curl()
         self.curl.setopt(pycurl.POST, 1)
@@ -55,6 +65,10 @@ class YamahaRemoteControl(GObject.GObject):
             return self.is_muted
         elif prop.name == 'power':
             return self.is_power_on
+        elif prop.name == 'shuffle':
+            return self.shuffle
+        elif prop.name == 'repeat':
+            return self.repeat
         else:
             raise AttributeError, "Unknown property %s" % prop.name
 
@@ -65,6 +79,10 @@ class YamahaRemoteControl(GObject.GObject):
             self.set_is_muted(value)
         elif prop.name == 'power':
             self.set_is_power_on(value)
+        elif prop.name == 'shuffle':
+            self.set_shuffle_mode(value)
+        elif prop.name == 'repeat':
+            self.set_repeat_mode(value)
         else:
             raise AttributeError, "Unknown property %s" % prop.name
 
@@ -168,6 +186,11 @@ class YamahaRemoteControl(GObject.GObject):
             self.source = source
             self.notify('source')
 
+        if not self.source_param_names:
+            self.get_sources()
+
+        self.refresh_play_mode()
+
     def get_sources(self):
         cmd = "<Main_Zone><Input><Input_Sel_Item>GetParam</Input_Sel_Item></Input></Main_Zone>"
         items = self._get(cmd).find("Main_Zone/Input/Input_Sel_Item")
@@ -187,6 +210,19 @@ class YamahaRemoteControl(GObject.GObject):
             self._put(cmd)
             self.source = input_name
             self.notify('source')
+            self.refresh_play_mode()
+
+    def refresh_play_mode(self):
+        if self.source is None:
+            return
+
+        cmd = "<{param}><Play_Control><Play_Mode><Shuffle>GetParam</Shuffle></Play_Mode></Play_Control></{param}>"
+        shuffle = self._get(cmd)
+        self.set_shuffle_mode(shuffle.find("*/Play_Control/Play_Mode/Shuffle").text)
+
+        cmd = "<{param}><Play_Control><Play_Mode><Repeat>GetParam</Repeat></Play_Mode></Play_Control></{param}>"
+        repeat = self._get(cmd)
+        self.set_repeat_mode(repeat.find("*/Play_Control/Play_Mode/Repeat").text)
 
     def wait_for_menu_info(self):
         if self.source is None:
@@ -195,8 +231,7 @@ class YamahaRemoteControl(GObject.GObject):
             cmd = "<{param}><List_Info>GetParam</List_Info></{param}>"
             rsp = self._get(cmd)
 
-            source = self.source_param_names[self.source]
-            info = rsp.find("%s/List_Info" % source)
+            info = rsp.find("*/List_Info")
             status = info.find("Menu_Status").text
             if status == "Ready":
                 return info
@@ -209,7 +244,9 @@ class YamahaRemoteControl(GObject.GObject):
     def get_menu_name(self):
         info = self.wait_for_menu_info()
         if info is not None:
-            return info.find("Menu_Name").text
+            name = info.find("Menu_Name").text
+            name = name.replace("&amp;", "&")
+            return name
         else:
             return ""
 
@@ -245,6 +282,26 @@ class YamahaRemoteControl(GObject.GObject):
 
     def has_menu(self):
         return self.source in ["USB", "NET RADIO", "SERVER"]
+
+    def get_shuffle_mode(self):
+        return self.shuffle
+
+    def set_shuffle_mode(self, shuffle_mode):
+        if self.shuffle != shuffle_mode:
+            cmd = "<{param}><Play_Control><Play_Mode><Shuffle>%s</Shuffle></Play_Mode></Play_Control></{param}>"
+            self._put(cmd % shuffle_mode)
+            self.shuffle = shuffle_mode
+            self.notify('shuffle')
+
+    def get_repeat_mode(self):
+        return self.repeat
+
+    def set_repeat_mode(self, repeat_mode):
+        if self.repeat != repeat_mode:
+            cmd = "<{param}><Play_Control><Play_Mode><Repeat>%s</Repeat></Play_Mode></Play_Control></{param}>"
+            self._put(cmd % repeat_mode)
+            self.repeat = repeat_mode
+            self.notify('repeat')
 
 nice_names = {
         'SERVER': 'Media Server',
@@ -321,7 +378,7 @@ class YamahaRemoteWindow(Gtk.Window):
         label.modify_font(font_desc)
         input_box.pack_start(frame, True, True, 0)
 
-        input_box = Gtk.Alignment(xalign=0.0, yalign=0.0, xscale=1.0, yscale=1.0)
+        input_box = Gtk.Alignment(xscale=1.0, yscale=1.0)
         input_box.set_padding(6, 0, 0, 0)
         frame.add(input_box)
 
@@ -345,12 +402,34 @@ class YamahaRemoteWindow(Gtk.Window):
 
         self.menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.menu_box.set_no_show_all(True)
-        vbox.pack_start(self.menu_box, True, True, 12)
+        vbox.pack_start(self.menu_box, True, True, 18)
 
+        box = Gtk.Box()
+        box.show()
+        self.menu_box.pack_start(box, True, True, 0)
+
+        alignment = Gtk.Alignment(xalign=0.0)
+        alignment.show()
+        box.pack_start(alignment, True, True, 0)
         path_bar = Gtk.Box()
         path_bar.get_style_context().add_class("linked")
         path_bar.show()
-        self.menu_box.pack_start(path_bar, False, False, 0)
+        alignment.add(path_bar)
+
+        alignment = Gtk.Alignment(xalign=1.0, xscale=1.0)
+        alignment.show()
+        box.pack_start(alignment, False, False, 0)
+        button_box = Gtk.Box(spacing=6)
+        button_box.show()
+        alignment.add(button_box)
+        self.repeat_button = Gtk.ToggleButton("Repeat")
+        self.repeat_button.connect("clicked", self.on_repeat_button_clicked)
+        self.repeat_button.show()
+        button_box.pack_start(self.repeat_button, False, False, 0)
+        self.shuffle_button = Gtk.ToggleButton("Shuffle")
+        self.shuffle_button.connect("clicked", self.on_shuffle_button_clicked)
+        self.shuffle_button.show()
+        button_box.pack_start(self.shuffle_button, False, False, 0)
 
         self.parent_button = Gtk.Button()
         self.parent_button.set_focus_on_click(False)
@@ -391,6 +470,8 @@ class YamahaRemoteWindow(Gtk.Window):
         self.remote.connect("notify::volume", self.on_remote_volume_notify)
         self.remote.connect("notify::muted", self.on_remote_muted_notify)
         self.remote.connect("notify::power", self.on_remote_power_notify)
+        self.remote.connect("notify::repeat", self.on_remote_repeat_notify)
+        self.remote.connect("notify::shuffle", self.on_remote_shuffle_notify)
         self.remote.refresh()
 
         name_label.set_markup("<b>%s</b>" % self.remote.get_network_name())
@@ -496,6 +577,49 @@ class YamahaRemoteWindow(Gtk.Window):
         button.handler_block_by_func(self.on_current_button_clicked)
         button.set_active(True)
         button.handler_unblock_by_func(self.on_current_button_clicked)
+
+    def on_repeat_button_clicked(self, button):
+        # Lazy me is lazy
+        repeat_mode = self.remote.get_repeat_mode()
+        modes = ["Off", "One", "All"]
+        index = (modes.index(repeat_mode) + 1) % 3
+        self.remote.set_repeat_mode(modes[index])
+
+    def on_remote_repeat_notify(self, remote, data):
+        repeat_mode = self.remote.get_repeat_mode()
+        self.repeat_button.handler_block_by_func(self.on_repeat_button_clicked)
+        self.repeat_button.set_active(repeat_mode != "Off")
+        self.repeat_button.handler_unblock_by_func(self.on_repeat_button_clicked)
+        if repeat_mode == "One":
+            self.repeat_button.set_label("Repeat One")
+        elif repeat_mode == "All":
+            self.repeat_button.set_label("Repeat All")
+        else:
+            self.repeat_button.set_label("Repeat")
+
+    def on_shuffle_button_clicked(self, button):
+        # Lazy me is lazy
+        shuffle_mode = self.remote.get_shuffle_mode()
+        source = self.remote.get_source()
+        if source in ["SERVER", "USB", "NET RADIO"]:
+            modes = ["Off", "On"]
+        else:
+            # AirPlay, iPod_USB
+            modes = ["Off", "Songs", "Albums"]
+        index = (modes.index(shuffle_mode) + 1) % len(modes)
+        self.remote.set_shuffle_mode(modes[index])
+
+    def on_remote_shuffle_notify(self, remote, data):
+        shuffle_mode = self.remote.get_shuffle_mode()
+        self.shuffle_button.handler_block_by_func(self.on_shuffle_button_clicked)
+        self.shuffle_button.set_active(shuffle_mode != "Off")
+        self.shuffle_button.handler_unblock_by_func(self.on_shuffle_button_clicked)
+        if shuffle_mode == "Songs":
+            self.shuffle_button.set_label("Shuffle Songs")
+        elif shuffle_mode == "Albums":
+            self.shuffle_button.set_label("Shuffle Albums")
+        else:
+            self.shuffle_button.set_label("Shuffle")
 
 def on_activate(app):
     windows = app.get_windows()

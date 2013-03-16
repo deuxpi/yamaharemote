@@ -422,7 +422,8 @@ class YamahaRemoteWindow(Gtk.Window):
         model = Gtk.ListStore(str, int)
         self.menu_tree.set_model(model)
         self.current_button.set_label(self.remote.get_menu_name())
-        self.load_id = GObject.idle_add(self.load_menu(model, self.remote.get_menu()).next)
+        self.load_id = GObject.idle_add(
+                self.load_menu(model, self.remote.get_menu()).next)
 
     def on_menu_row_activated(self, tree, path, column):
         model = tree.get_model()
@@ -439,8 +440,20 @@ class YamahaRemoteWindow(Gtk.Window):
         button.set_active(True)
         button.handler_unblock_by_func(self.on_current_button_clicked)
 
-if __name__ == '__main__':
+def on_activate(app):
+    win = app.get_windows()[0]
+    win.present()
+
+def on_startup(app):
+    settings = Gtk.Settings.get_default()
+    settings.set_property("gtk-application-prefer-dark-theme", True)
+
     win = YamahaRemoteWindow()
-    win.connect("delete-event", Gtk.main_quit)
+    win.set_application(app)
     win.show_all()
-    Gtk.main()
+
+if __name__ == '__main__':
+    app = Gtk.Application(application_id="ca.deuxpi.YamahaRemote")
+    app.connect("activate", on_activate)
+    app.connect("startup", on_startup)
+    app.run(sys.argv)

@@ -1,3 +1,20 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2013 Philippe Gauthier
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import pycurl
 import cStringIO
 import xml.etree.ElementTree as ET
@@ -216,13 +233,17 @@ class YamahaRemoteControl(GObject.GObject):
         if self.source is None:
             return
 
-        cmd = "<{param}><Play_Control><Play_Mode><Shuffle>GetParam</Shuffle></Play_Mode></Play_Control></{param}>"
-        shuffle = self._get(cmd)
-        self.set_shuffle_mode(shuffle.find("*/Play_Control/Play_Mode/Shuffle").text)
+        if self.source in ["USB", "iPod_USB", "SERVER"]:
+            cmd = "<{param}><Play_Control><Play_Mode><Shuffle>GetParam</Shuffle></Play_Mode></Play_Control></{param}>"
+            shuffle = self._get(cmd)
+            self.set_shuffle_mode(shuffle.find("*/Play_Control/Play_Mode/Shuffle").text)
 
-        cmd = "<{param}><Play_Control><Play_Mode><Repeat>GetParam</Repeat></Play_Mode></Play_Control></{param}>"
-        repeat = self._get(cmd)
-        self.set_repeat_mode(repeat.find("*/Play_Control/Play_Mode/Repeat").text)
+            cmd = "<{param}><Play_Control><Play_Mode><Repeat>GetParam</Repeat></Play_Mode></Play_Control></{param}>"
+            repeat = self._get(cmd)
+            self.set_repeat_mode(repeat.find("*/Play_Control/Play_Mode/Repeat").text)
+        else:
+            self.set_shuffle_mode(None)
+            self.set_repeat_mode(None)
 
     def wait_for_menu_info(self):
         if self.source is None:
@@ -288,8 +309,9 @@ class YamahaRemoteControl(GObject.GObject):
 
     def set_shuffle_mode(self, shuffle_mode):
         if self.shuffle != shuffle_mode:
-            cmd = "<{param}><Play_Control><Play_Mode><Shuffle>%s</Shuffle></Play_Mode></Play_Control></{param}>"
-            self._put(cmd % shuffle_mode)
+            if shuffle_mode is not None:
+                cmd = "<{param}><Play_Control><Play_Mode><Shuffle>%s</Shuffle></Play_Mode></Play_Control></{param}>"
+                self._put(cmd % shuffle_mode)
             self.shuffle = shuffle_mode
             self.notify('shuffle')
 
@@ -298,8 +320,9 @@ class YamahaRemoteControl(GObject.GObject):
 
     def set_repeat_mode(self, repeat_mode):
         if self.repeat != repeat_mode:
-            cmd = "<{param}><Play_Control><Play_Mode><Repeat>%s</Repeat></Play_Mode></Play_Control></{param}>"
-            self._put(cmd % repeat_mode)
+            if repeat_mode is not None:
+                cmd = "<{param}><Play_Control><Play_Mode><Repeat>%s</Repeat></Play_Mode></Play_Control></{param}>"
+                self._put(cmd % repeat_mode)
             self.repeat = repeat_mode
             self.notify('repeat')
 
@@ -502,9 +525,10 @@ class YamahaRemoteWindow(Gtk.Window):
                 current_iter = input_iter
         return current_iter
 
-    def on_input_selection_changed(self, selection):
-        model, treeiter = selection.get_selected()
+    def on_input_selection_changed(self, combobox):
+        treeiter = combobox.get_active_iter()
         if treeiter is not None:
+            model = combobox.get_model()
             name = model[treeiter][1]
             self.remote.set_source(name)
             self.update_menu()
@@ -570,13 +594,14 @@ class YamahaRemoteWindow(Gtk.Window):
     def on_remote_repeat_notify(self, remote, data):
         repeat_mode = self.remote.get_repeat_mode()
         self.repeat_button.handler_block_by_func(self.on_repeat_button_clicked)
-        self.repeat_button.set_active(repeat_mode != "Off")
+        self.repeat_button.set_active(repeat_mode != None and repeat_mode != "Off")
         self.repeat_button.handler_unblock_by_func(self.on_repeat_button_clicked)
         if repeat_mode == "One":
             self.repeat_button.set_label("Repeat One")
         elif repeat_mode == "All":
             self.repeat_button.set_label("Repeat All")
         else:
+            self.repeat_button.set_sensitive(repeat_mode is not None)
             self.repeat_button.set_label("Repeat")
 
     def on_shuffle_button_clicked(self, button):
@@ -594,13 +619,14 @@ class YamahaRemoteWindow(Gtk.Window):
     def on_remote_shuffle_notify(self, remote, data):
         shuffle_mode = self.remote.get_shuffle_mode()
         self.shuffle_button.handler_block_by_func(self.on_shuffle_button_clicked)
-        self.shuffle_button.set_active(shuffle_mode != "Off")
+        self.shuffle_button.set_active(shuffle_mode != None and shuffle_mode != "Off")
         self.shuffle_button.handler_unblock_by_func(self.on_shuffle_button_clicked)
         if shuffle_mode == "Songs":
             self.shuffle_button.set_label("Shuffle Songs")
         elif shuffle_mode == "Albums":
             self.shuffle_button.set_label("Shuffle Albums")
         else:
+            self.shuffle_button.set_sensitive(shuffle_mode is not None)
             self.shuffle_button.set_label("Shuffle")
 
 def on_activate(app):

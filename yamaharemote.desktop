@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Yamaha Remote Control
+Name[fr]=Télécommande Yamaha
+Comment=Control Yamaha network-enabled AV systems
+Comment[fr]=Manipulation des appareils AV Yamaha sur le réseau
+Icon=audio-speakers
+Exec=yamaharemote
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=GNOME;GTK;AudioVideo;

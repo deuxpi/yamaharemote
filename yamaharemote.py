@@ -320,11 +320,11 @@ class YamahaRemoteWindow(Gtk.Window):
 
         self.load_id = None
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         self.add(vbox)
 
         system_box = Gtk.Box(spacing=12)
-        vbox.pack_start(system_box, False, False, 12)
+        vbox.pack_start(system_box, False, False, 0)
 
         image = Gtk.Image.new_from_icon_name("audio-speakers", Gtk.IconSize.DIALOG)
         system_box.pack_start(image, False, False, 0)
@@ -343,7 +343,7 @@ class YamahaRemoteWindow(Gtk.Window):
         volume_box = Gtk.Box(spacing=12)
         alignment = Gtk.Alignment(xalign=0, yalign=0, xscale=1, yscale=1)
         alignment.add(volume_box)
-        vbox.pack_start(alignment, False, False, 12)
+        vbox.pack_start(alignment, False, False, 0)
 
         label = Gtk.Label()
         label.set_label("Volume:")
@@ -370,41 +370,22 @@ class YamahaRemoteWindow(Gtk.Window):
         input_box = Gtk.Box(spacing=12)
         vbox.pack_start(input_box, True, True, 0)
 
-        frame = Gtk.Frame(label="Choose a sound input:")
-        frame.set_shadow_type(Gtk.ShadowType.NONE)
-        label = frame.get_label_widget()
-        font_desc = Pango.FontDescription()
-        font_desc.set_weight(Pango.Weight.BOLD)
-        label.modify_font(font_desc)
-        input_box.pack_start(frame, True, True, 0)
-
-        input_box = Gtk.Alignment(xscale=1.0, yscale=1.0)
-        input_box.set_padding(6, 0, 0, 0)
-        frame.add(input_box)
-
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_shadow_type(Gtk.ShadowType.IN)
-        scrolled.set_min_content_height(150)
-        input_box.add(scrolled)
+        label = Gtk.Label("Source:")
+        input_box.pack_start(label, False, False, 0)
 
         store = Gtk.ListStore(str, str)
-        self.input_tree = Gtk.TreeView(store)
-        self.input_tree.set_headers_visible(False)
-        selection = self.input_tree.get_selection()
-        selection.set_mode(Gtk.SelectionMode.BROWSE)
-        selection.connect("changed", self.on_input_selection_changed)
-        scrolled.add(self.input_tree)
-
+        self.source_combo = Gtk.ComboBox.new_with_model(store)
+        self.source_combo.connect("changed", self.on_input_selection_changed)
+        input_box.pack_start(self.source_combo, True, True, 0)
         renderer = Gtk.CellRendererText()
-        column = Gtk.TreeViewColumn("Name", renderer, text=0)
-        self.input_tree.append_column(column)
+        self.source_combo.pack_start(renderer, True)
+        self.source_combo.add_attribute(renderer, "text", 0)
 
         self.menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.menu_box.set_no_show_all(True)
-        vbox.pack_start(self.menu_box, True, True, 18)
+        vbox.pack_start(self.menu_box, False, False, 0)
 
-        box = Gtk.Box()
+        box = Gtk.Box(spacing=12)
         box.show()
         self.menu_box.pack_start(box, True, True, 0)
 
@@ -415,6 +396,22 @@ class YamahaRemoteWindow(Gtk.Window):
         path_bar.get_style_context().add_class("linked")
         path_bar.show()
         alignment.add(path_bar)
+
+        self.parent_button = Gtk.Button()
+        self.parent_button.set_focus_on_click(False)
+        self.parent_button.show()
+        arrow = Gtk.Arrow(Gtk.ArrowType.LEFT, Gtk.ShadowType.OUT)
+        arrow.show()
+        self.parent_button.add(arrow)
+        self.parent_button.connect("clicked", self.on_parent_button_clicked)
+        path_bar.add(self.parent_button)
+
+        self.current_button = Gtk.ToggleButton("Current")
+        self.current_button.set_focus_on_click(False)
+        self.current_button.set_active(True)
+        self.current_button.connect("clicked", self.on_current_button_clicked)
+        self.current_button.show()
+        path_bar.add(self.current_button)
 
         alignment = Gtk.Alignment(xalign=1.0, xscale=1.0)
         alignment.show()
@@ -431,25 +428,10 @@ class YamahaRemoteWindow(Gtk.Window):
         self.shuffle_button.show()
         button_box.pack_start(self.shuffle_button, False, False, 0)
 
-        self.parent_button = Gtk.Button()
-        self.parent_button.set_focus_on_click(False)
-        self.parent_button.show()
-        arrow = Gtk.Arrow(Gtk.ArrowType.LEFT, Gtk.ShadowType.OUT)
-        arrow.show()
-        self.parent_button.add(arrow)
-
-        self.parent_button.connect("clicked", self.on_parent_button_clicked)
-        path_bar.add(self.parent_button)
-        self.current_button = Gtk.ToggleButton("Current")
-        self.current_button.set_active(True)
-        self.current_button.connect("clicked", self.on_current_button_clicked)
-        self.current_button.show()
-        path_bar.add(self.current_button)
-
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_shadow_type(Gtk.ShadowType.IN)
-        scrolled.set_min_content_height(150)
+        scrolled.set_min_content_height(250)
         scrolled.show()
         self.menu_box.pack_start(scrolled, True, True, 0)
 
@@ -477,9 +459,9 @@ class YamahaRemoteWindow(Gtk.Window):
         name_label.set_markup("<b>%s</b>" % self.remote.get_network_name())
         input_iter = self.add_inputs()
         if input_iter is not None:
-            selection.handler_block_by_func(self.on_input_selection_changed)
-            selection.select_iter(input_iter)
-            selection.handler_unblock_by_func(self.on_input_selection_changed)
+            self.source_combo.handler_block_by_func(self.on_input_selection_changed)
+            self.source_combo.set_active_iter(input_iter)
+            self.source_combo.handler_unblock_by_func(self.on_input_selection_changed)
 
         self.update_menu()
 
@@ -510,7 +492,7 @@ class YamahaRemoteWindow(Gtk.Window):
         self.mute_switch.thaw_notify()
 
     def add_inputs(self):
-        model = self.input_tree.get_model()
+        model = self.source_combo.get_model()
         current_input = self.remote.get_source()
         current_iter = None
         for source_name in self.remote.get_sources():
